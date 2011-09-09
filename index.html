@@ -1,0 +1,249 @@
+<!DOCTYPE html> 
+<html> 
+<head> 
+<meta http-equiv="content-type" content="text/html; charset=UTF-8"/> 
+<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+
+<title>Testing fusion tables</title> 
+ <link rel="stylesheet" href="styles.css" type="text/css" media="screen" /> 
+<script type="text/javascript" src="MarkerClustered.js"></script> 
+<script type="text/javascript" src="http://www.google.com/jsapi"></script> 
+<script type="text/javascript" src="http://maps.google.com/maps/api/js?sensor=false"></script>
+<script type="text/javascript" id="script">
+
+	google.load('visualization', '1', {'packages':['table']});
+
+	var labFT = {
+		map : null,
+		map_canvas : null,
+		markerClusterer : null,	
+		infowindow : null,
+		circle : null,
+		marker : null,
+		maxZoom : 16,
+		defaultRadius : 100,
+		icon : "http://chart.apis.google.com/chart?cht=mm&chs=24x24&chco=FFFFFF,0099CC,000000&ext=.png",
+		vizContainer : null,
+		searchFrm : null,
+		searchInput : null,
+		areaInput : null,
+	
+		createMarkersSearch : function (results){
+			if(!results) return;
+			if (this.markerClusterer) {
+			  this.markerClusterer.clearMarkers();
+			}	
+			var _cols = results.getNumberOfColumns();
+			var _markers = [];
+			var z;
+			var _latlng;
+		
+			for(var i=0; i<results.getNumberOfRows();i++){
+				_latlng = results.getValue(i, 2);
+				_latlng = _latlng.slice(_latlng.indexOf("es>")+3);
+				_latlng = _latlng.slice(0,_latlng.indexOf("</coo"));
+				_latlng = new google.maps.LatLng( _latlng.slice(_latlng.indexOf(",")+1),_latlng.slice(0,_latlng.indexOf(",")));
+				(function(){
+					var marker = new google.maps.Marker({
+						position: _latlng,
+						icon : labFT.icon,
+						title : results.getValue(i, 0) + " " + results.getValue(i, 1)
+					});
+					var infowindow = new google.maps.InfoWindow({
+						content : marker.getTitle()
+					});
+					google.maps.event.addListener(marker, 'click', function() {
+						infowindow.open(labFT.map,marker);
+					});
+					_markers.push(marker);
+				})();
+			}
+			this.markerClusterer = new MarkerClusterer(this.map, _markers, {
+				maxZoom: labFT.maxZoom
+			});
+		},	
+		getDataTable : function(response) {
+		  if(!response) return;
+		  var _datatable = response.getDataTable();
+		  labFT.createMarkersSearch(_datatable);
+		  if(labFT.vizContainer){
+			var view = new google.visualization.DataView(_datatable);
+			view.setRows(view.getFilteredRows([{column: 1, minValue: new Date(2007, 0, 1)}]));
+			var table = new google.visualization.Table(document.getElementById(labFT.vizContainer));
+			view.hideColumns([2])
+			table.draw(view);		  
+			//var table = new google.visualization.Table(document.getElementById(labFT.vizContainer));
+			//table.draw(response.getDataTable(), {showRowNumber: true});
+		  }
+		},
+		getData : function(){
+			var pos = this.marker.getPosition();
+			var radius = this.defaultRadius;
+			var cadena = "";
+			if(this.searchInput && this.searchInput!=""){
+				cadena = document.getElementById(this.searchInput).value;
+			}
+			var whereClause = "";
+			if(cadena && cadena!="") {
+				whereClause =  " WHERE 'name' CONTAINS IGNORING CASE '" + cadena + "' and ";
+			}else{
+				whereClause =  " WHERE ";
+			}
+			whereClause += " ST_INTERSECTS(geometry, CIRCLE(LATLNG(" + pos.lat() + "," + pos.lng() + "), " + radius + "))";
+			var queryText = encodeURIComponent("SELECT 'name','description' as 'desc','geometry' FROM 1417472 " + whereClause);
+			//console.log("SELECT 'name','description','geometry' FROM 1417472 " + whereClause);
+			var query = new google.visualization.Query('http://www.google.com/fusiontables/gvizdata?tq='  + queryText);
+			query.send(this.getDataTable);
+		},
+		createMarker:function(pos){
+			this.marker = new google.maps.Marker({
+				position: pos, 
+				map: this.map,
+				title : "current position",
+				draggable : true
+			}); 
+			
+			this.circle = new google.maps.Circle({
+			  map: this.map,
+			  radius: 100 // 500m
+			});
+			
+			this.circle.bindTo('center', this.marker, 'position');
+			google.maps.event.addListener(this.marker, 'dragend', function() {
+				labFT.getData();
+			});
+		},
+		init : function(_config){
+			if(!document.getElementById) return;
+			if(!_config.canvas || _config.canvas==null) return;
+			
+			this.vizContainer = _config.vizContainer;
+			this.canvas = _config.canvas;
+			this.searchFrm = _config.searchForm;
+			this.searchInput = _config.searchText;
+			
+			if(_config.onclicksearch!="" && _config.search!=""){
+				if(document.getElementById(_config.onclicksearch)){
+					document.getElementById(_config.onclicksearch).onclick = function(){
+						labFT.getData();
+					}
+				}
+			}
+
+			if(_config.searchFrm!=""){
+				if(document.getElementById(this.searchFrm)){
+					document.getElementById(this.searchFrm).onsubmit = function(){
+						labFT.getData();
+						return false;
+					}
+				}
+			}
+			
+			if(_config.onchangesearch!="" && _config.search!=""){
+				if(document.getElementById(_config.onchangesearch)){
+					document.getElementById(_config.onchangesearch).onchange = function(){
+						labFT.circle.setRadius(parseInt(this.value));
+						labFT.defaultRadius = this.value;
+						labFT.getData();
+					}
+				}
+			}
+			
+			var pos = new google.maps.LatLng(41.818408,1.590271);
+			var myOptions = {
+				zoom: 14,
+				center: pos,
+				mapTypeId: google.maps.MapTypeId.ROADMAP
+			};
+			this.map = new google.maps.Map(document.getElementById(this.canvas), myOptions);
+			if(navigator.geolocation) {
+				navigator.geolocation.getCurrentPosition(function(position) {
+					pos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
+					labFT.map.setCenter(pos);
+					labFT.createMarker(pos);
+					labFT.getData();
+				}, function(){});		
+			}else{
+				this.createMarker(pos);
+				this.getData();
+			}			
+		}
+	}
+	
+	window.onload = function(){
+		detectBrowser();
+		labFT.init({
+			canvas : "content_1",
+			vizContainer : "content_2",
+			searchText : "cerca",
+			searchForm : "search",
+			area : "area",
+			onclicksearch : "enviar",
+			onchangesearch : "area" //range input
+		})
+	}
+	
+	function detectBrowser() {
+	  var useragent = navigator.userAgent;
+	  var mapdiv = document.getElementById("content_1");
+	  var D = document;
+	  var height = Math.max(
+			Math.max(D.body.scrollHeight, D.documentElement.scrollHeight),
+			Math.max(D.body.offsetHeight, D.documentElement.offsetHeight),
+			Math.max(D.body.clientHeight, D.documentElement.clientHeight)
+	  )-150;
+			 
+	  if (useragent.indexOf('iPhone') != -1 || useragent.indexOf('Android') != -1 ) {
+		mapdiv.style.width = '100%';
+		mapdiv.style.height = height + "px";
+	  } else {
+		mapdiv.style.width = '100%';
+		mapdiv.style.height = height + "px";
+	  }
+	}
+	
+	function tabSwitch(new_tab, new_content) {  
+		if(!document.getElementById) return;
+
+		document.getElementById('content_1').style.display = 'none';  
+		document.getElementById('content_2').style.display = 'none';  
+		document.getElementById(new_content).style.display = 'block';     
+	  
+		document.getElementById('tab_1').className = '';  
+		document.getElementById('tab_2').className = '';  
+		document.getElementById(new_tab).className = 'active';        
+		return false;
+	}  	
+ 
+</script> 
+</head> 
+
+<body> 
+	<div class="tabbed_box">
+		<div id="cercador">
+			<form action="#" id="search">
+				<label for="cerca">Name:</label> <input type="text" name="cerca" id="cerca" /><br />
+				<label for="area">Radius (meters):</label> <input type="range" min="100" max="2000" value="200" step="100" id="area" name="area" />
+				<input type="submit" id="enviar" value="&gt;" />
+			</form>
+		</div>
+
+		<div class="tabbed_area">  
+			<ul class="tabs">  
+				<li><a href="#" id="tab_1" class="active" onclick="return tabSwitch('tab_1', 'content_1');">Map</a></li>  
+				<li><a href="#" id="tab_2" onclick="return tabSwitch('tab_2', 'content_2');">List</a></li>  
+			</ul>  
+			<div id="content_1"></div> 
+			<div id="content_2"></div> 
+		</div>
+	<a href="http://gplus.to/davidayalas" class="me">http://gplus.to/davidayalas</a>		
+	</div> 	
+
+</body> 
+
+<script>
+
+
+
+</script>
+</html> 
